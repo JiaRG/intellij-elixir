@@ -8,6 +8,7 @@ import org.elixir_lang.jps.shared.cli.CliArgs
 import org.elixir_lang.jps.shared.cli.CliTool
 import org.elixir_lang.jps.shared.sdk.SdkPaths
 import org.elixir_lang.run.baseCommandLine
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 
 object Mix {
     @JvmStatic
@@ -23,6 +24,12 @@ object Mix {
     ): GeneralCommandLine {
         val updatedEnvironment = environment.toMutableMap()
         SdkPaths.maybeUpdateMixHome(updatedEnvironment, elixirSdk.homePath)
+        if (DevContainerPaths.isDevContainerUncPath(elixirSdk.homePath)) {
+            listOf("MIX_HOME", "MIX_ARCHIVES").forEach { name ->
+                val currentValue = updatedEnvironment[name] ?: return@forEach
+                updatedEnvironment[name] = DevContainerPaths.uncToLinuxPath(currentValue) ?: currentValue
+            }
+        }
 
         val args: CliArgs =
             CliArguments.argsOrThrow(

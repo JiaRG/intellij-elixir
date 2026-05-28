@@ -3,6 +3,7 @@ package org.elixir_lang.run
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.trace
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import org.elixir_lang.sdk.wsl.wslCompat
 import java.io.IOException
 
@@ -52,8 +53,18 @@ open class WslAwareCommandLine : GeneralCommandLine {
 
     @Throws(IOException::class)
     override fun createProcess(processBuilder: ProcessBuilder): Process {
-        wslCompat.convertProcessBuilderArgumentsForWsl(processBuilder, this)
+        val hasDevContainerPaths = DevContainerPaths.convertProcessBuilderPaths(processBuilder)
+        if (hasDevContainerPaths) {
+            LOG.info("Converted Dev Container paths before process creation")
+        }
+        if (!hasDevContainerPaths && !isDevContainerCommandLine(this)) {
+            wslCompat.convertProcessBuilderArgumentsForWsl(processBuilder, this)
+        }
         LOG.trace  { formatCommandLineForLogging(processBuilder, "Command line") }
         return super.createProcess(processBuilder)
     }
 }
+
+internal fun isDevContainerCommandLine(commandLine: GeneralCommandLine): Boolean =
+    DevContainerPaths.isDevContainerUncPath(commandLine.workDirectory?.path) ||
+            DevContainerPaths.isDevContainerUncPath(commandLine.exePath)

@@ -1,6 +1,7 @@
 package org.elixir_lang.sdk
 
 import org.elixir_lang.PlatformTestCase
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import java.io.File
 import java.nio.file.Paths
 
@@ -158,6 +159,58 @@ class SdkHomeScanTest : PlatformTestCase() {
         }
     }
 
+    fun `test devcontainer UNC root is extracted from workspace path`() {
+        val result = DevContainerPaths.uncRoot(
+            "\\\\devcontainer.ij\\2b826ebed049@\\workspaces\\emqx"
+        )
+
+        assertEquals("\\\\devcontainer.ij\\2b826ebed049@", result)
+    }
+
+    fun `test linux path converts to devcontainer UNC path`() {
+        val result = DevContainerPaths.linuxPathToUnc(
+            "\\\\devcontainer.ij\\2b826ebed049@",
+            "/usr/local/lib/elixir"
+        )
+
+        assertEquals("\\\\devcontainer.ij\\2b826ebed049@\\usr\\local\\lib\\elixir", result)
+    }
+
+    fun `test devcontainer UNC root includes WSL backend suffix`() {
+        val result = DevContainerPaths.uncRoot(
+            "//devcontainer.ij/2b826ebed049@wsl~Ubuntu/workspaces/emqx"
+        )
+
+        assertEquals("\\\\devcontainer.ij\\2b826ebed049@wsl~Ubuntu", result)
+    }
+
+    fun `test devcontainer path embedded in eval string converts to linux path`() {
+        val result = DevContainerPaths.convertDevContainerPathsInString(
+            "OutDir=\"//devcontainer.ij/2b826ebed049@wsl~Ubuntu/workspaces/emqx/_build/test/lib/emqx_license/ebin\", " +
+                    "Source=\"//devcontainer.ij/2b826ebed049@wsl~Ubuntu/workspaces/emqx/apps/emqx_license/test/emqx_license_test_lib.erl\""
+        )
+
+        assertEquals(
+            "OutDir=\"/workspaces/emqx/_build/test/lib/emqx_license/ebin\", " +
+                    "Source=\"/workspaces/emqx/apps/emqx_license/test/emqx_license_test_lib.erl\"",
+            result
+        )
+    }
+
+    fun `test process builder command converts devcontainer paths before execution`() {
+        val processBuilder = ProcessBuilder(
+            "/usr/local/lib/erlang/bin/erl",
+            "-eval",
+            "Source=\"//devcontainer.ij/2b826ebed049@wsl~Ubuntu/workspaces/emqx/apps/emqx_license/test/emqx_license_test_lib.erl\""
+        )
+
+        assertTrue(DevContainerPaths.convertProcessBuilderPaths(processBuilder))
+        assertEquals(
+            "Source=\"/workspaces/emqx/apps/emqx_license/test/emqx_license_test_lib.erl\"",
+            processBuilder.command()[2]
+        )
+    }
+
     // ========== Edge Cases ==========
 
     fun `test config with all null transforms`() {
@@ -234,4 +287,5 @@ class SdkHomeScanTest : PlatformTestCase() {
         travisCIKerlTransform = { it },
         elixirInstallScriptDirName = "otp"
     )
+
 }

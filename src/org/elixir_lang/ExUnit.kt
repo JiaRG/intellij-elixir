@@ -4,6 +4,7 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.Sdk
 import org.elixir_lang.exunit.ElixirModules
+import org.elixir_lang.mix.withPackageManagerBootstrap
 
 object ExUnit {
     fun commandLine(
@@ -23,13 +24,10 @@ object ExUnit {
             ElixirModules.parametersList() + elixirArgumentList,
             project = project
         )
-        commandLine.addParameters(mixArgumentList)
-        addExUnit(commandLine)
+        commandLine.addParameters(withPackageManagerBootstrap(mixArgumentList + exUnitArguments()))
 
         return commandLine
     }
 
-    private fun addExUnit(commandLine: GeneralCommandLine) {
-        commandLine.addParameters("test", "--formatter", "TeamCityExUnitFormatter")
-    }
+    private fun exUnitArguments(): kotlin.collections.List<String> = listOf("test", "--formatter", "TeamCityExUnitFormatter")
 }

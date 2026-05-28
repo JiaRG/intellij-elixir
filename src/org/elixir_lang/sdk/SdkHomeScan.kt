@@ -2,8 +2,12 @@ package org.elixir_lang.sdk
 
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.project.guessProjectDir
+import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.util.system.CpuArch
 import com.intellij.util.system.OS
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import org.elixir_lang.sdk.wsl.wslCompat
 import java.io.File
 import java.nio.file.Path
@@ -112,9 +116,16 @@ object SdkHomeScan {
         homePathByVersion: MutableMap<SdkHomeKey, String>,
         config: Config
     ): Map<SdkHomeKey, String> {
-        if (wslCompat.isWslUncPath(path.toString())) {
+        val pathString = path?.toString()
+
+        if (wslCompat.isWslUncPath(pathString)) {
             // WSL distributions
             homePathByVersionWSLs(path, homePathByVersion, config)
+            return homePathByVersion
+        }
+
+        if (DevContainerPaths.isDevContainerUncPath(pathString)) {
+            homePathByVersionDevContainer(pathString, homePathByVersion, config)
             return homePathByVersion
         }
 
@@ -131,9 +142,97 @@ object SdkHomeScan {
 
         SdkHomePaths.mergeElixirInstallScript(homePathByVersion, config.elixirInstallScriptDirName)
         SdkHomePaths.mergeMise(homePathByVersion, config.toolName)
+        homePathByVersionDevContainer(null, homePathByVersion, config)
+        val openDevContainerProjectPaths = openDevContainerProjectPaths()
+        LOG.info("Open Dev Container project paths for ${config.toolName} SDK scan: $openDevContainerProjectPaths")
+        openDevContainerProjectPaths.forEach { devContainerProjectPath ->
+            homePathByVersionDevContainer(devContainerProjectPath, homePathByVersion, config)
+        }
 
         return homePathByVersion
     }
+
+    /**
+     * Scans a Dev Container exposed through JetBrains' Windows UNC path.
+     * Mirrors the Linux system-path scanning logic, but maps Linux absolute paths to the container UNC root.
+     */
+    private fun homePathByVersionDevContainer(
+        path: String?,
+        homePathByVersion: MutableMap<SdkHomeKey, String>,
+        config: Config
+    ) {
+        val devContainerRoots = DevContainerPaths.roots(path)
+        LOG.info("Dev Container roots for ${config.toolName} SDK scan (path: $path): $devContainerRoots")
+
+        devContainerRoots.forEach { devContainerRoot ->
+            val userHomes = devContainerUserHomes(devContainerRoot)
+            LOG.info("Dev Container user homes for ${config.toolName} SDK scan ($devContainerRoot): $userHomes")
+
+            userHomes.forEach { userHome ->
+                LOG.info("Scanning Dev Container user home for ${config.toolName} SDKs: $userHome")
+                SdkHomePaths.mergeASDF(homePathByVersion, config.toolName, userHome)
+                SdkHomePaths.mergeMise(homePathByVersion, config.toolName, userHome)
+                SdkHomePaths.mergeElixirInstallScript(homePathByVersion, config.elixirInstallScriptDirName, userHome)
+
+                if (config.travisCIKerlTransform != null) {
+                    SdkHomePaths.mergeTravisCIKerl(homePathByVersion, config.travisCIKerlTransform, userHome)
+                }
+            }
+
+            DevContainerPaths.linuxPathToUnc(devContainerRoot, config.linuxDefaultPath)?.let {
+                LOG.info("Checking Dev Container Linux default path for ${config.toolName}: ${config.linuxDefaultPath} -> $it")
+                putIfDirectory(homePathByVersion, SdkHomePaths.unknownVersionKey(it), it)
+            }
+            DevContainerPaths.linuxPathToUnc(devContainerRoot, config.linuxMintPath)?.let {
+                LOG.info("Checking Dev Container Linux Mint path for ${config.toolName}: ${config.linuxMintPath} -> $it")
+                putIfDirectory(homePathByVersion, SdkHomePaths.unknownVersionKey(it), it)
+            }
+
+            DevContainerPaths.linuxPathToUnc(devContainerRoot, SdkHomePaths.NIX_STORE_PATH)?.let { nixStore ->
+                LOG.info("Checking Dev Container Nix store for ${config.toolName}: ${SdkHomePaths.NIX_STORE_PATH} -> $nixStore")
+                val nixTransform = config.nixTransform ?: { it }
+                SdkHomePaths.mergeNixStore(homePathByVersion, config.nixPattern, nixTransform, nixStore)
+            }
+        }
+    }
+
+    private fun devContainerUserHomes(devContainerRoot: String): List<String> {
+        val userHomes = mutableListOf<String>()
+
+        DevContainerPaths.linuxPathToUnc(devContainerRoot, "/root")?.let { rootHome ->
+            if (File(rootHome).isDirectory) {
+                LOG.info("Dev Container root home exists: $rootHome")
+                userHomes.add(rootHome)
+            } else {
+                LOG.info("Dev Container root home is not a directory: $rootHome")
+            }
+        }
+
+        DevContainerPaths.linuxPathToUnc(devContainerRoot, "/home")?.let { homeDirectory ->
+            val homeDirectoryFile = File(homeDirectory)
+            if (!homeDirectoryFile.isDirectory) {
+                LOG.info("Dev Container /home is not a directory: $homeDirectory")
+            }
+
+            homeDirectoryFile.listFiles()?.forEach { child ->
+                if (child.isDirectory) {
+                    LOG.info("Dev Container user home exists: ${child.absolutePath}")
+                    userHomes.add(child.absolutePath)
+                }
+            }
+        }
+
+        return userHomes
+    }
+
+    private fun openDevContainerProjectPaths(): List<String> =
+        ProjectManager.getInstance().openProjects.mapNotNull { project ->
+            val guessProjectDirPath = project.guessProjectDir()?.toNioPathOrNull()?.toString()
+            val basePath = project.basePath
+            val projectPath = guessProjectDirPath ?: basePath
+            LOG.info("Open project path candidate for Dev Container scan (${project.name}): guessProjectDir=$guessProjectDirPath, basePath=$basePath")
+            projectPath
+        }.filter { DevContainerPaths.isDevContainerUncPath(it) }
 
     /**
      * Scans Linux for SDK installations via system paths, ASDF, Mise, kerl, Travis CI kerl, and Nix.

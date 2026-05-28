@@ -7,11 +7,15 @@ import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.util.system.OS
 import org.elixir_lang.jps.shared.cli.CliArgs
 import org.elixir_lang.jps.shared.cli.CliTool
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import org.elixir_lang.sdk.erlang_dependent.getErlangSdk
 import org.elixir_lang.sdk.erlang_dependent.requireErlangSdkOrNotifyAndThrow
 import org.elixir_lang.jps.shared.cli.CliArguments as SharedCliArguments
 
 object CliArguments {
+    private const val DEV_CONTAINER_FALLBACK_ELIXIR_VERSION = "1.17.0"
+    private val VERSION_REGEX = Regex("""\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)*""")
+
     fun args(
         elixirSdk: Sdk,
         tool: CliTool,
@@ -20,10 +24,12 @@ object CliArguments {
         os: OS = effectiveOS(elixirSdk),
         ansiEnabled: Boolean = true
     ): CliArgs? {
+        val elixirHomePath = elixirSdk.homePath
+        val erlangHomePath = elixirSdk.getErlangSdk()?.homePath
         return SharedCliArguments.args(
-            elixirSdk.homePath,
-            elixirSdk.versionString,
-            elixirSdk.getErlangSdk()?.homePath,
+            DevContainerPaths.uncToLinuxPath(elixirHomePath) ?: elixirHomePath,
+            effectiveElixirVersionString(elixirSdk, elixirHomePath),
+            DevContainerPaths.uncToLinuxPath(erlangHomePath) ?: erlangHomePath,
             tool,
             extraElixirArguments,
             extraErlangArguments,
@@ -48,11 +54,13 @@ object CliArguments {
         val erlangHomePath =
             erlangSdk.homePath
                 ?: throw ExecutionException("Erlang SDK home path is not configured")
+        val effectiveElixirHomePath = DevContainerPaths.uncToLinuxPath(elixirHomePath) ?: elixirHomePath
+        val effectiveErlangHomePath = DevContainerPaths.uncToLinuxPath(erlangHomePath) ?: erlangHomePath
 
         return SharedCliArguments.args(
-            elixirHomePath,
-            elixirSdk.versionString,
-            erlangHomePath,
+            effectiveElixirHomePath,
+            effectiveElixirVersionString(elixirSdk, elixirHomePath),
+            effectiveErlangHomePath,
             tool,
             extraElixirArguments,
             extraErlangArguments,
@@ -63,8 +71,30 @@ object CliArguments {
 
     private fun effectiveOS(elixirSdk: Sdk): OS {
         if (OS.CURRENT == OS.Windows) {
-            elixirSdk.homePath?.let { if (WslPath.isWslUncPath(it)) return OS.Linux }
+            elixirSdk.homePath?.let {
+                if (WslPath.isWslUncPath(it) || DevContainerPaths.isDevContainerUncPath(it)) {
+                    return OS.Linux
+                }
+            }
         }
         return OS.CURRENT
     }
+
+    private fun effectiveElixirVersionString(elixirSdk: Sdk, elixirHomePath: String?): String? {
+        val versionString = elixirSdk.versionString
+        if (extractVersion(versionString) != null) {
+            return versionString
+        }
+
+        if (!DevContainerPaths.isDevContainerUncPath(elixirHomePath)) {
+            return versionString
+        }
+
+        return extractVersion(elixirSdk.name)
+            ?: extractVersion(elixirHomePath)
+            ?: DEV_CONTAINER_FALLBACK_ELIXIR_VERSION
+    }
+
+    private fun extractVersion(value: String?): String? =
+        value?.let { VERSION_REGEX.find(it)?.value }
 }

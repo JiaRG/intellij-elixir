@@ -25,6 +25,7 @@ import org.elixir_lang.jps.shared.sdk.SdkPaths
 import org.elixir_lang.sdk.SdkHomeKey
 import org.elixir_lang.sdk.SdkHomePaths
 import org.elixir_lang.sdk.SdkHomeScan
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import org.elixir_lang.sdk.erlang_dependent.AdditionalDataConfigurable
 import org.elixir_lang.sdk.wsl.wslCompat
 import org.elixir_lang.util.WriteActions
@@ -144,7 +145,7 @@ class Type : SdkType(ErlangSdkTypeId.ERLANG_SDK_TYPE_ID) {
         }
 
         @JvmStatic
-        internal fun versionStringForHome(
+        fun versionStringForHome(
             sdkHome: String,
             resolvedVersion: String?,
         ): String? {
@@ -264,19 +265,39 @@ class Type : SdkType(ErlangSdkTypeId.ERLANG_SDK_TYPE_ID) {
     override fun suggestHomePath(): String? = suggestHomePaths().firstOrNull()
 
     @Deprecated("Deprecated in Java")
-    override fun suggestHomePaths(): Collection<String> = homePathByVersion().values
+    override fun suggestHomePaths(): Collection<String> {
+        val homePaths = homePathByVersion().values
+        LOGGER.info("Erlang SDK suggestHomePaths(): $homePaths")
+        return homePaths
+    }
 
     override fun suggestHomePath(path: Path): String? {
-        return homePathByVersion(path).values.firstOrNull()
+        val homePaths = homePathByVersion(path).values
+        val suggestedHomePath = homePaths.firstOrNull()
+        LOGGER.info("Erlang SDK suggestHomePath(path=$path): suggested=$suggestedHomePath, all=$homePaths")
+        return suggestedHomePath
     }
 
     override fun suggestHomePaths(project: Project?): Collection<String> {
-        return homePathByVersion(project?.guessProjectDir()?.toNioPathOrNull()).values
+        val path = project?.guessProjectDir()?.toNioPathOrNull()
+        val homePaths = homePathByVersion(path).values
+        LOGGER.info("Erlang SDK suggestHomePaths(project=${project?.name}, path=$path): $homePaths")
+        return homePaths
     }
 
     override fun isValidSdkHome(path: String): Boolean {
         val erlExe = erlExecutable(path)
-        return erlExe.canExecute()
+        val valid = if (DevContainerPaths.isDevContainerUncPath(path)) {
+            erlExe.isFile && erlExe.canRead()
+        } else {
+            erlExe.canExecute()
+        }
+        LOGGER.info(
+            "Erlang SDK home validation for '$path': valid=$valid, " +
+                    "devContainer=${DevContainerPaths.isDevContainerUncPath(path)}, " +
+                    "erl=${erlExe.path} exists=${erlExe.isFile} canRead=${erlExe.canRead()} canExecute=${erlExe.canExecute()}"
+        )
+        return valid
     }
 
     override fun suggestSdkName(
@@ -287,17 +308,35 @@ class Type : SdkType(ErlangSdkTypeId.ERLANG_SDK_TYPE_ID) {
     }
 
     override fun getVersionString(sdkHome: String): String? {
-        val detectedVersion = detectSdkVersion(sdkHome)?.otpRelease ?: return null
+        val detectedVersion = detectSdkVersion(sdkHome)?.otpRelease
+        if (detectedVersion == null) {
+            if (DevContainerPaths.isDevContainerUncPath(sdkHome)) {
+                val source = SdkPaths.detectSource(sdkHome)
+                val versionString = buildString {
+                    if (source != null) {
+                        append(source).append(" ")
+                    }
+                    append("Erlang at ").append(sdkHome)
+                }
+                LOGGER.info("Erlang SDK version string for Dev Container home '$sdkHome' fell back to: $versionString")
+                return versionString
+            }
+
+            LOGGER.info("Erlang SDK version string for home '$sdkHome': null")
+            return null
+        }
         val source = SdkPaths.detectSource(sdkHome)
         // Use directory name for version if it's more specific (e.g., "28.3" vs "28")
         val dirVersion = File(sdkHome).name
         val displayVersion = if (dirVersion.startsWith(detectedVersion)) dirVersion else detectedVersion
-        return buildString {
+        val versionString = buildString {
             if (source != null) {
                 append(source).append(" ")
             }
             append("Erlang ").append(displayVersion)
         }
+        LOGGER.info("Erlang SDK version string for home '$sdkHome': $versionString")
+        return versionString
     }
 
     override fun createAdditionalDataConfigurable(

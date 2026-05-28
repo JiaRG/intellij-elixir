@@ -1,10 +1,13 @@
 package org.elixir_lang.sdk.elixir
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.testFramework.registerOrReplaceServiceInstance
 import org.elixir_lang.PlatformTestCase
 import org.elixir_lang.sdk.wsl.MockWslCompatService
 import org.elixir_lang.sdk.wsl.WslCompatService
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Tests for Elixir SDK Type naming methods.
@@ -12,6 +15,7 @@ import org.elixir_lang.sdk.wsl.WslCompatService
 class TypeNamingTest : PlatformTestCase() {
 
     private lateinit var elixirType: Type
+    private val createdPaths: MutableList<Path> = mutableListOf()
 
     override fun setUp() {
         super.setUp()
@@ -23,6 +27,15 @@ class TypeNamingTest : PlatformTestCase() {
             testRootDisposable,
         )
         elixirType = Type.instance
+    }
+
+    override fun tearDown() {
+        try {
+            createdPaths.forEach { FileUtil.delete(it.toFile()) }
+            createdPaths.clear()
+        } finally {
+            super.tearDown()
+        }
     }
 
     fun testSuggestSdkName_miseElixir() {
@@ -73,9 +86,31 @@ class TypeNamingTest : PlatformTestCase() {
         assertEquals("Elixir 1.15.0", version)
     }
 
+    fun testGetVersionString_fromElixirAppFile() {
+        val sdkHome = createElixirHomeWithAppFile("1.19.1")
+
+        val version = Type.versionStringForHome(sdkHome.toString(), null)
+
+        assertEquals("Elixir 1.19.1", version)
+    }
+
     fun testGetVersionString_includesElixir() {
         // Version string should include "Elixir" for clarity in detected SDKs list
         val version = elixirType.getVersionString("/Users/josh/.local/share/mise/installs/elixir/1.15.7")
         assertTrue("Version string should contain 'Elixir'", version.contains("Elixir"))
+    }
+
+    private fun createElixirHomeWithAppFile(version: String): Path {
+        val home = Files.createTempDirectory("elixir-home").also { createdPaths.add(it) }
+        val ebin = Files.createDirectories(home.resolve("lib").resolve("elixir").resolve("ebin"))
+        Files.writeString(
+            ebin.resolve("elixir.app"),
+            """
+            {application,elixir,
+             [{description,"elixir"},
+              {vsn,"$version"}]}.
+            """.trimIndent()
+        )
+        return home
     }
 }

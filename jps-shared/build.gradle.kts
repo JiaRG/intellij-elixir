@@ -1,6 +1,10 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+
 plugins {
     kotlin("jvm")
 }
+
 base {
     archivesName.set("${rootProject.name}.${project.name}")
 }
@@ -16,5 +20,11 @@ repositories {
     mavenCentral()
 }
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
+}
+
+tasks.withType<KotlinJvmCompile>().configureEach {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
 }

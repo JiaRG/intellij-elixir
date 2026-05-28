@@ -50,7 +50,7 @@ public class SelectOtpApps extends SelectImportedProjectsStep<OtpApp> {
   @Nullable
   @Override
   protected Icon getElementIcon(OtpApp otpApp) {
-    return myDuplicateModuleNames.contains(otpApp.getName()) ? Icons.MIX_MODULE_CONFLICT : null;
+    return myDuplicateModuleNames.contains(otpApp.getModuleName()) ? Icons.MIX_MODULE_CONFLICT : null;
   }
 
   /**
@@ -60,10 +60,10 @@ public class SelectOtpApps extends SelectImportedProjectsStep<OtpApp> {
     // NOTE: It is assumed that elements are sorted by names, therefore conflicting names a grouped together.
     String previousAppName = null;
     for(OtpApp selectedOtpApp : fileChooser.getMarkedElements()){
-      if(selectedOtpApp.getName().equals(previousAppName)){
+      if(selectedOtpApp.getModuleName().equals(previousAppName)){
         fileChooser.setElementMarked(selectedOtpApp, false);
       }else{
-        previousAppName = selectedOtpApp.getName();
+        previousAppName = selectedOtpApp.getModuleName();
       }
     }
   }
@@ -73,8 +73,8 @@ public class SelectOtpApps extends SelectImportedProjectsStep<OtpApp> {
     Set<String> contains = new HashSet<String>(selectedOtpApps.size());
     myDuplicateModuleNames.clear();
     for (OtpApp otpApp :selectedOtpApps){
-      if(!contains.add(otpApp.getName())){
-        myDuplicateModuleNames.add(otpApp.getName());
+      if(!contains.add(otpApp.getModuleName())){
+        myDuplicateModuleNames.add(otpApp.getModuleName());
       }
     }
   }

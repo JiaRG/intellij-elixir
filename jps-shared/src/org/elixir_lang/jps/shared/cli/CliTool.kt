@@ -35,6 +35,13 @@ enum class CliTool(
      * WSL, pass in the OS.Linux for WSL contexts.
      */
     fun getExecutableFilepath(sdkHomePath: String, os: OS = OS.CURRENT): String =
-        Path(sdkHomePath, "bin", getExecutableFilename(os)).absolutePathString()
+        if (isPosixPath(sdkHomePath)) {
+            listOf(sdkHomePath.trimEnd('/'), "bin", getExecutableFilename(os)).joinToString("/")
+        } else {
+            Path(sdkHomePath, "bin", getExecutableFilename(os)).absolutePathString()
+        }
 
 }
+
+private fun isPosixPath(path: String): Boolean =
+    path.startsWith("/") && !path.startsWith("//")

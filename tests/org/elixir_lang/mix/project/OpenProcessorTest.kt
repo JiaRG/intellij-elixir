@@ -72,18 +72,66 @@ class OpenProcessorTest : PlatformTestCase() {
         myFixture.tempDirFixture.createFile("builder_test_project/mix.exs", mixExsContent)
 
         val builder = ProjectImportBuilder.EXTENSIONS_POINT_NAME.findExtensionOrFail(Builder::class.java)
+        builder.cleanup()
 
-        // Set project root - this is what doQuickImport does
-        builder.setProjectRoot(projectDir)
+        try {
+            // Set project root - this is what doQuickImport does
+            builder.setProjectRoot(projectDir)
 
-        // Get list triggers the deferred scan
-        val foundApps = builder.list
+            // Get list triggers the deferred scan
+            val foundApps = builder.list
 
-        // Should find the OTP app
-        assertFalse("Builder should find OTP apps after setProjectRoot and getList", foundApps.isEmpty())
+            // Should find the OTP app
+            assertFalse("Builder should find OTP apps after setProjectRoot and getList", foundApps.isEmpty())
 
-        val rootApp = foundApps.find { it.name == "test_app" }
-        assertNotNull("Should find the test_app OTP app", rootApp)
+            val rootApp = foundApps.find { it.name == "test_app" }
+            assertNotNull("Should find the test_app OTP app", rootApp)
+        } finally {
+            builder.cleanup()
+        }
+    }
+
+    fun testBuilderAssignsPathBasedModuleNamesForDuplicateOtpAppNames() {
+        val mixExsContent = """
+            defmodule Emqx.MixProject do
+              use Mix.Project
+
+              def project do
+                [app: :emqx, version: "0.1.0"]
+              end
+            end
+        """.trimIndent()
+
+        val projectDir = myFixture.tempDirFixture.findOrCreateDir("umbrella")
+        myFixture.tempDirFixture.createFile("umbrella/mix.exs", mixExsContent)
+        myFixture.tempDirFixture.findOrCreateDir("umbrella/apps/emqx")
+        myFixture.tempDirFixture.createFile("umbrella/apps/emqx/mix.exs", mixExsContent)
+
+        val builder = ProjectImportBuilder.EXTENSIONS_POINT_NAME.findExtensionOrFail(Builder::class.java)
+        builder.cleanup()
+
+        try {
+            builder.setProjectRoot(projectDir)
+
+            val foundApps = builder.list
+            val rootApp = foundApps.find { it.root.path == projectDir.path }
+            val childApp = foundApps.find { it.root.path.endsWith("/apps/emqx") }
+
+            assertNotNull("Should find root emqx OTP app", rootApp)
+            assertNotNull("Should find apps/emqx OTP app", childApp)
+            assertEquals("Root app should keep its OTP app name", "emqx", rootApp!!.moduleName)
+            assertEquals(
+                "Child app with duplicate OTP app name should use path-disambiguated module name",
+                "emqx-apps-emqx",
+                childApp!!.moduleName
+            )
+            assertTrue(
+                "Import list text should use the disambiguated module name",
+                childApp.toString().startsWith("emqx-apps-emqx ")
+            )
+        } finally {
+            builder.cleanup()
+        }
     }
 
     fun testSupportedExtensions() {

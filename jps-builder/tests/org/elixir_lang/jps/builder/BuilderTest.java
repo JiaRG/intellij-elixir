@@ -217,6 +217,21 @@ public class BuilderTest extends JpsBuildTestCase {
         checkMappingsAreSameAfterRebuild(makeResult);
     }
 
+    public void testMixCompilesErlangSources() throws IOException {
+        CompilerOptions compilerOptions = Extension.getOrCreateExtension(myModel.getProject()).getOptions();
+        compilerOptions.useMixCompiler = true;
+
+        setupMixProject();
+        createFile("src/mix_compiled_erl.erl", "-module(mix_compiled_erl).\n-export([ok/0]).\nok() -> ok.\n");
+        BuildResult result = doBuild(CompileScopeTestBuilder.rebuild().all());
+        assertSuccessfulWithLogs(result);
+        assertCompiled("src/mix_compiled_erl.erl");
+        assertNotNull(FileUtil.findFileInProvidedPath(
+                getAbsolutePath("_build/dev/lib/mix_compiled/ebin/"),
+                "mix_compiled_erl.beam"
+        ));
+    }
+
     public void testElixircWarningsAsErrors() {
         CompilerOptions compilerOptions = Extension.getOrCreateExtension(myModel.getProject()).getOptions();
         compilerOptions.useMixCompiler = false;

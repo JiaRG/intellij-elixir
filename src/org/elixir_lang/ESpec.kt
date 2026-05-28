@@ -4,6 +4,7 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.Sdk
 import org.elixir_lang.espec.Modules
+import org.elixir_lang.mix.withPackageManagerBootstrap
 
 object ESpec {
     fun commandLine(environment: Map<String, String>,
@@ -22,13 +23,10 @@ object ESpec {
                 Modules.elixirParametersList() + elixirArgumentList,
                 project = project
         )
-        commandLine.addParameters(mixArgumentList)
-        addESpec(commandLine)
+        commandLine.addParameters(withPackageManagerBootstrap(mixArgumentList + especArguments()))
 
         return commandLine
     }
 
-    private fun addESpec(commandLine: GeneralCommandLine) {
-        commandLine.addParameter("espec")
-    }
+    private fun especArguments(): kotlin.collections.List<String> = listOf("espec")
 }

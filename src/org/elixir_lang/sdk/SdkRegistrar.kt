@@ -6,6 +6,8 @@ import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.projectRoots.SdkType
 import com.intellij.openapi.projectRoots.impl.ProjectJdkImpl
+import org.elixir_lang.jps.shared.sdk.SdkPaths
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import org.elixir_lang.sdk.erlang_dependent.resolveErlangSdkOrNullAndNotify
 import org.elixir_lang.sdk.wsl.wslCompat
 import org.elixir_lang.sdk.elixir.Type as ElixirSdkType
@@ -19,7 +21,9 @@ object SdkRegistrar {
     ): Sdk? {
         val canonicalHomePath = canonicalHomePath(homePath) ?: return null
         val sdkType = ErlangSdkType.instance
-        val versionString = ErlangSdkType.versionStringForHome(canonicalHomePath, resolvedVersion) ?: return null
+        val versionString = ErlangSdkType.versionStringForHome(canonicalHomePath, resolvedVersion)
+            ?: fallbackErlangVersionString(canonicalHomePath)
+            ?: return null
         val existing = findSdkByHomePath(sdkType, canonicalHomePath)
         val sdkName = ErlangSdkType.suggestSdkNameForHome(canonicalHomePath, resolvedVersion)
 
@@ -38,7 +42,9 @@ object SdkRegistrar {
     ): Sdk? {
         val canonicalHomePath = canonicalHomePath(homePath) ?: return null
         val sdkType = ElixirSdkType.instance
-        val versionString = ElixirSdkType.versionStringForHome(canonicalHomePath, resolvedVersion) ?: return null
+        val versionString = ElixirSdkType.versionStringForHome(canonicalHomePath, resolvedVersion)
+            ?: fallbackElixirVersionString(canonicalHomePath)
+            ?: return null
         val existing = findSdkByHomePath(sdkType, canonicalHomePath)
         val sdkName = ElixirSdkType.suggestSdkNameForHome(canonicalHomePath, resolvedVersion)
 
@@ -55,6 +61,28 @@ object SdkRegistrar {
 
     private fun canonicalHomePath(homePath: String?): String? =
         wslCompat.canonicalizePathNullable(homePath)
+
+    private fun fallbackErlangVersionString(homePath: String): String? {
+        if (!DevContainerPaths.isDevContainerUncPath(homePath)) {
+            return null
+        }
+
+        return buildString {
+            SdkPaths.detectSource(homePath)?.let { append(it).append(" ") }
+            append("Erlang at ").append(homePath)
+        }
+    }
+
+    private fun fallbackElixirVersionString(homePath: String): String? {
+        if (!DevContainerPaths.isDevContainerUncPath(homePath)) {
+            return null
+        }
+
+        return buildString {
+            SdkPaths.detectSource(homePath)?.let { append(it).append(" ") }
+            append("Elixir 1.17.0 at ").append(homePath)
+        }
+    }
 
     private fun findSdkByHomePath(sdkType: SdkType, homePath: String): Sdk? {
         val projectJdkTable = ProjectJdkTable.getInstance()

@@ -12,6 +12,7 @@ import org.elixir_lang.jps.shared.cli.CliTool
 import org.elixir_lang.sdk.erlang_dependent.ErlangSdkResolver
 import org.elixir_lang.sdk.erlang_dependent.ErlangSdkResult
 import org.elixir_lang.sdk.erlang_dependent.MissingErlangSdkReason
+import org.elixir_lang.jps.shared.cli.CliArguments as SharedCliArguments
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
@@ -115,6 +116,60 @@ class CliArgumentsTest(private val targetOS: OS) : PlatformTestCase() {
     }
 
     @Test
+    fun testPosixHomePathsStayPosixForLinuxTarget() {
+        val args = SharedCliArguments.args(
+            elixirSdkHomePath = "/usr/local/lib/elixir",
+            elixirVersion = "1.17.0",
+            erlangSdkHomePath = "/usr/local/lib/erlang",
+            tool = CliTool.MIX,
+            os = OS.Linux,
+        )
+        assertNotNull(args)
+
+        val tokens = args!!.arguments
+        assertEquals("/usr/local/lib/erlang/bin/erl", args.exePath)
+        assertContainsSequence(tokens, listOf("-elixir_root", "/usr/local/lib/elixir/bin/../lib"))
+        assertContainsSequence(tokens, listOf("-pa", "/usr/local/lib/elixir/bin/../lib/elixir/ebin"))
+
+        val extraIndex = tokens.indexOf("-extra")
+        assertTrue(extraIndex >= 0 && extraIndex + 1 < tokens.size)
+        assertEquals("/usr/local/lib/elixir/bin/mix", tokens[extraIndex + 1])
+    }
+
+    @Test
+    fun testPosixUnknownVersionDoesNotListWindowsFilesystem() {
+        val args = SharedCliArguments.args(
+            elixirSdkHomePath = "/usr/local/lib/elixir",
+            elixirVersion = "Elixir Unknown",
+            erlangSdkHomePath = "/usr/local/lib/erlang",
+            tool = CliTool.MIX,
+            os = OS.Linux,
+        )
+        assertNotNull(args)
+
+        val tokens = args!!.arguments
+        assertContainsSequence(tokens, listOf("-pa", "/usr/local/lib/elixir/bin/../lib/eex/ebin"))
+        assertContainsSequence(tokens, listOf("-pa", "/usr/local/lib/elixir/bin/../lib/mix/ebin"))
+    }
+
+    @Test
+    fun testDevContainerUnknownVersionUsesModernArguments() {
+        val erlangSdk = mockSdk("Erlang 28", "//devcontainer.ij/2b826ebed049@/usr/local/lib/erlang")
+        val elixirSdk = mockSdk("Elixir Unknown", "//devcontainer.ij/2b826ebed049@/usr/local/lib/elixir", erlangSdk)
+        val args = CliArguments.args(
+            elixirSdk = elixirSdk,
+            tool = CliTool.MIX,
+            os = OS.Linux,
+        )
+        assertNotNull(args)
+
+        val tokens = args!!.arguments
+        assertEquals("/usr/local/lib/erlang/bin/erl", args.exePath)
+        assertContainsSequence(tokens, listOf("-elixir_root", "/usr/local/lib/elixir/bin/../lib"))
+        assertContainsSequence(tokens, listOf("-pa", "/usr/local/lib/elixir/bin/../lib/elixir/ebin"))
+    }
+
+    @Test
     fun testIexArgumentsAcrossVersions() {
         val elixirHome = createElixirHome("elixir")
         val args150 = CliArguments.args(
@@ -204,6 +259,17 @@ class CliArgumentsTest(private val targetOS: OS) : PlatformTestCase() {
         `when`(sdk.versionString).thenReturn(version)
         `when`(sdk.homePath).thenReturn(homePath.toString())
         `when`(sdk.name).thenReturn(version ?: homePath.fileName.toString())
+        if (erlangSdk != null ) {
+            erlangSdkByElixirSdk[sdk] = erlangSdk
+        }
+        return sdk
+    }
+
+    private fun mockSdk(version: String?, homePath: String, erlangSdk: Sdk? = null): Sdk {
+        val sdk = mock(Sdk::class.java)
+        `when`(sdk.versionString).thenReturn(version)
+        `when`(sdk.homePath).thenReturn(homePath)
+        `when`(sdk.name).thenReturn(version ?: homePath.substringAfterLast('/'))
         if (erlangSdk != null ) {
             erlangSdkByElixirSdk[sdk] = erlangSdk
         }

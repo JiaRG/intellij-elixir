@@ -1,14 +1,14 @@
 package org.elixir_lang.jps.builder.target;
 
+import com.intellij.openapi.diagnostic.Logger;
 import org.elixir_lang.jps.builder.Target;
-import org.elixir_lang.jps.builder.model.ModuleType;
+import org.elixir_lang.jps.builder.ModuleUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.builders.BuildTargetLoader;
 import org.jetbrains.jps.builders.ModuleBasedBuildTargetType;
-import org.jetbrains.jps.model.JpsDummyElement;
 import org.jetbrains.jps.model.JpsModel;
-import org.jetbrains.jps.model.module.JpsTypedModule;
+import org.jetbrains.jps.model.module.JpsModule;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +17,7 @@ import java.util.List;
  * Created by zyuyou on 15/7/10.
  */
 public class Type extends ModuleBasedBuildTargetType<Target>{
+  private static final Logger LOG = Logger.getInstance(Type.class);
   public static final Type PRODUCTION = new Type("elixir-production", false);
   public static final Type TEST = new Type("elixir-test", true);
 
@@ -31,9 +32,14 @@ public class Type extends ModuleBasedBuildTargetType<Target>{
   @Override
   public List<Target> computeAllTargets(@NotNull JpsModel model) {
     List<Target> targets = new ArrayList<>();
-    for (JpsTypedModule<JpsDummyElement> module : model.getProject().getModules(ModuleType.INSTANCE)){
-      targets.add(new Target(this, module));
+    LOG.info("Computing Elixir JPS " + (myTests ? "test" : "production") + " targets for " + model.getProject().getModules().size() + " module(s)");
+    for (JpsModule module : model.getProject().getModules()){
+      ModuleUtil.logDiagnostic(module, "computeAllTargets/" + (myTests ? "test" : "production"));
+      if (ModuleUtil.isCompilable(module)) {
+        targets.add(new Target(this, module));
+      }
     }
+    LOG.info("Computed Elixir JPS " + (myTests ? "test" : "production") + " target(s): " + targets.size());
     return targets;
   }
 
@@ -44,11 +50,17 @@ public class Type extends ModuleBasedBuildTargetType<Target>{
       @Nullable
       @Override
       public Target createTarget(@NotNull String targetId) {
-        for (JpsTypedModule<JpsDummyElement> module : model.getProject().getModules(ModuleType.INSTANCE)){
+        LOG.info("Loading Elixir JPS target id=" + targetId + ", tests=" + myTests);
+        for (JpsModule module : model.getProject().getModules()){
           if(module.getName().equals(targetId)){
+            ModuleUtil.logDiagnostic(module, "createTarget/" + (myTests ? "test" : "production"));
+          }
+          if(module.getName().equals(targetId) && ModuleUtil.isCompilable(module)){
+            LOG.info("Loaded Elixir JPS target id=" + targetId + ", tests=" + myTests);
             return new Target(Type.this, module);
           }
         }
+        LOG.info("No Elixir JPS target loaded for id=" + targetId + ", tests=" + myTests);
         return null;
       }
     };

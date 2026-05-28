@@ -12,6 +12,7 @@ import com.intellij.openapi.module.ModuleUtilCore
 import com.intellij.platform.ide.progress.ModalTaskOwner
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.projectRoots.*
 import com.intellij.openapi.roots.ModuleRootManager
@@ -37,6 +38,7 @@ import org.elixir_lang.jps.shared.sdk.SdkPaths
 import org.elixir_lang.sdk.SdkHomeKey
 import org.elixir_lang.sdk.SdkHomePaths
 import org.elixir_lang.sdk.*
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import org.elixir_lang.sdk.Type.ebinPathChainVirtualFile
 import org.elixir_lang.sdk.erlang_dependent.AdditionalDataConfigurable
 import org.elixir_lang.sdk.erlang_dependent.SdkAdditionalData
@@ -97,11 +99,17 @@ class Type : org.elixir_lang.sdk.erlang_dependent.Type(ElixirSdkTypeId.ELIXIR_SD
     override fun getPresentableName(): String = "Elixir SDK"
 
     override fun getVersionString(sdkHome: String): String {
-        return versionStringForHome(sdkHome, null)
+        val versionString = versionStringForHome(sdkHome, null)
             ?: buildString {
                 SdkPaths.detectSource(sdkHome)?.let { append(it).append(" ") }
-                append("Elixir Unknown")
+                if (DevContainerPaths.isDevContainerUncPath(sdkHome)) {
+                    append("Elixir 1.17.0 at ").append(sdkHome)
+                } else {
+                    append("Elixir Unknown")
+                }
             }
+        LOG.info("Elixir SDK version string for home '$sdkHome': $versionString")
+        return versionString
     }
 
     /**
@@ -157,11 +165,33 @@ ELIXIR_SDK_HOME
         val elixirc = File(CliTool.ELIXIRC.getExecutableFilepathWslSafe(path))
         val iex = File(CliTool.IEX.getExecutableFilepathWslSafe(path))
         val mix = File(CliTool.MIX.getExecutableFilepathWslSafe(path))
-        return elixir.canExecute() &&
-                elixirc.canExecute() &&
-                iex.canExecute() &&
-                mix.canRead() &&
-                SdkEbinPaths.hasEbinPath(path)
+
+        val hasExecutables = if (DevContainerPaths.isDevContainerUncPath(path)) {
+            elixir.isFile && elixir.canRead() &&
+                    elixirc.isFile && elixirc.canRead() &&
+                    iex.isFile && iex.canRead() &&
+                    mix.isFile && mix.canRead()
+        } else {
+            elixir.canExecute() &&
+                    elixirc.canExecute() &&
+                    iex.canExecute() &&
+                    mix.canRead()
+        }
+
+        val hasEbinPath = SdkEbinPaths.hasEbinPath(path)
+        val valid = hasExecutables && hasEbinPath
+
+        LOG.info(
+            "Elixir SDK home validation for '$path': valid=$valid, " +
+                    "devContainer=${DevContainerPaths.isDevContainerUncPath(path)}, " +
+                    "hasExecutables=$hasExecutables, hasEbinPath=$hasEbinPath, " +
+                    "elixir=${elixir.path} exists=${elixir.isFile} canRead=${elixir.canRead()} canExecute=${elixir.canExecute()}, " +
+                    "elixirc=${elixirc.path} exists=${elixirc.isFile} canRead=${elixirc.canRead()} canExecute=${elixirc.canExecute()}, " +
+                    "iex=${iex.path} exists=${iex.isFile} canRead=${iex.canRead()} canExecute=${iex.canExecute()}, " +
+                    "mix=${mix.path} exists=${mix.isFile} canRead=${mix.canRead()}"
+        )
+
+        return valid
     }
 
     override fun setupSdkPaths(sdk: Sdk) {
@@ -174,13 +204,25 @@ ELIXIR_SDK_HOME
     override fun suggestHomePath(): String? = suggestHomePaths().firstOrNull()
 
     override fun suggestHomePath(path: Path): String? {
-        return homePathByVersion(path).values.firstOrNull()
+        val homePaths = homePathByVersion(path).values
+        val suggestedHomePath = homePaths.firstOrNull()
+        LOG.info("Elixir SDK suggestHomePath(path=$path): suggested=$suggestedHomePath, all=$homePaths")
+        return suggestedHomePath
     }
 
     @Deprecated("Deprecated in Java")
-    override fun suggestHomePaths(): Collection<String> = homePathByVersion(null).values
-    override fun suggestHomePaths(project: Project?): @Unmodifiable Collection<String> =
-        homePathByVersion(project?.guessProjectDir()?.toNioPathOrNull()).values
+    override fun suggestHomePaths(): Collection<String> {
+        val homePaths = homePathByVersion(null).values
+        LOG.info("Elixir SDK suggestHomePaths(): $homePaths")
+        return homePaths
+    }
+
+    override fun suggestHomePaths(project: Project?): @Unmodifiable Collection<String> {
+        val path = project?.guessProjectDir()?.toNioPathOrNull()
+        val homePaths = homePathByVersion(path).values
+        LOG.info("Elixir SDK suggestHomePaths(project=${project?.name}, path=$path): $homePaths")
+        return homePaths
+    }
 
     override fun suggestSdkName(
         currentSdkName: String?,
@@ -188,6 +230,7 @@ ELIXIR_SDK_HOME
     ): String {
         return suggestSdkNameForHome(sdkHome, null)
     }
+
 
     private fun validateSdkHomePath(virtualFile: VirtualFile) {
         val selectedPath = virtualFile.path
@@ -241,6 +284,7 @@ ELIXIR_SDK_HOME
         private val SDK_HOME_CHILD_BASE_NAME_SET: Set<String> = setOf("lib", "src")
         private const val WINDOWS_32BIT_DEFAULT_HOME_PATH = "C:\\Program Files\\Elixir"
         private const val WINDOWS_64BIT_DEFAULT_HOME_PATH = "C:\\Program Files (x86)\\Elixir"
+        private val APP_VSN_PATTERN = Regex("""\{vsn,\s*"([^"]+)"""")
         private val versionByHomePath: MutableMap<String, String> = ConcurrentHashMap()
 
         @JvmStatic
@@ -279,6 +323,11 @@ ELIXIR_SDK_HOME
             }
 
             val canonicalHome = wslCompat.canonicalizePath(sdkHome)
+            elixirVersionFromSdkFiles(canonicalHome)?.let { version ->
+                LOG.info("Read Elixir version from SDK files for '$canonicalHome': $version")
+                return version
+            }
+
             val exePath = CliTool.ELIXIR.getExecutableFilepathWslSafe(canonicalHome)
             val exeFile = File(exePath)
             val lastModified = exeFile.lastModified()
@@ -334,6 +383,27 @@ ELIXIR_SDK_HOME
 
         private fun elixirVersionFromHomePath(homePath: String) =
             homePath.let { Release.fromString(File(it).name) }?.version()
+
+        private fun elixirVersionFromSdkFiles(homePath: String): String? {
+            val appFileCandidates = listOf(
+                File(homePath, "lib/elixir/ebin/elixir.app"),
+                File(homePath, "lib/elixir/src/elixir.app.src")
+            )
+
+            return appFileCandidates.firstNotNullOfOrNull { appFile ->
+                if (!appFile.isFile || !appFile.canRead()) {
+                    null
+                } else {
+                    try {
+                        val version = APP_VSN_PATTERN.find(appFile.readText())?.groupValues?.get(1)
+                        version?.takeIf { Release.fromString(it) != null }
+                    } catch (e: Exception) {
+                        LOG.debug("Failed to read Elixir version from ${appFile.path}", e)
+                        null
+                    }
+                }
+            }
+        }
 
         @JvmStatic
         internal fun setupSdkTableListener() {
@@ -858,14 +928,32 @@ ELIXIR_SDK_HOME
             if (version == null) null else "https://elixir-lang.org/docs/stable/elixir/"
 
         @JvmStatic
-        fun erlangSdkType(): SdkType =
-            if (ProcessOutput.isSmallIde) {
+        fun erlangSdkType(): SdkType {
+            val internalErlangSdkType = findInstance(org.elixir_lang.sdk.erlang.Type::class.java)
+
+            if (hasOpenDevContainerProject()) {
+                LOG.info("Using Elixir plugin Erlang SDK type because an open project is in a Dev Container")
+                return internalErlangSdkType
+            }
+
+            return if (ProcessOutput.isSmallIde) {
                 /* intellij-erlang's "Erlang SDK" does not work in small IDEs because it uses JavadocRoot for documentation,
                    which isn't available in Small IDEs. */
                 null
             } else {
                 EP_NAME.extensionList.find { sdkType -> sdkType.name == "Erlang SDK" }
-            } ?: findInstance(org.elixir_lang.sdk.erlang.Type::class.java)
+            } ?: internalErlangSdkType
+        }
+
+        private fun hasOpenDevContainerProject(): Boolean =
+            ProjectManager.getInstance().openProjects.any { project ->
+                val guessProjectDirPath = project.guessProjectDir()?.toNioPathOrNull()?.toString()
+                val basePath = project.basePath
+                val projectPath = guessProjectDirPath ?: basePath
+                val isDevContainerProject = DevContainerPaths.isDevContainerUncPath(projectPath)
+                LOG.info("Erlang SDK type selection project candidate (${project.name}): guessProjectDir=$guessProjectDirPath, basePath=$basePath, devContainer=$isDevContainerProject")
+                isDevContainerProject
+            }
 
         @JvmStatic
         val instance: Type

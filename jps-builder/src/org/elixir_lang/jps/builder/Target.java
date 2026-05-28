@@ -1,8 +1,8 @@
 package org.elixir_lang.jps.builder;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.containers.ContainerUtil;
 import org.elixir_lang.jps.builder.execution.SourceRootDescriptor;
-import org.elixir_lang.jps.builder.model.ModuleType;
 import org.elixir_lang.jps.builder.target.Type;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -22,10 +22,16 @@ import org.jetbrains.jps.model.module.JpsTypedModuleSourceRoot;
 import java.io.File;
 import java.util.*;
 
+import static com.intellij.util.io.URLUtil.extractPath;
+
 /**
  * Created by zyuyou on 15/7/10.
  */
 public class Target extends ModuleBasedTarget<SourceRootDescriptor> {
+  private static final Logger LOG = Logger.getInstance(Target.class);
+  private static final List<String> PRODUCTION_MIX_SOURCE_ROOT_NAMES = Arrays.asList("c_src", "include", "lib", "src");
+  private static final List<String> TEST_MIX_SOURCE_ROOT_NAMES = Arrays.asList("spec", "test");
+
   public Target(Type targetType, @NotNull JpsModule module) {
     super(targetType, module);
   }
@@ -48,8 +54,10 @@ public class Target extends ModuleBasedTarget<SourceRootDescriptor> {
     List<BuildTarget<?>> dependencies = new ArrayList<>();
 
     Set<JpsModule> modules = JpsJavaExtensionService.dependencies(myModule).includedIn(JpsJavaClasspathKind.compile(isTests())).getModules();
+    LOG.info("Computing Elixir JPS dependencies for " + getPresentableName() + ", candidate modules=" + modules.size());
     for (JpsModule module : modules){
-      if(module.getModuleType().equals(ModuleType.INSTANCE)){
+      ModuleUtil.logDiagnostic(module, "dependency-of-" + myModule.getName());
+      if(ModuleUtil.isCompilable(module)){
         dependencies.add(new Target(getElixirTargetType(), module));
       }
     }
@@ -69,11 +77,44 @@ public class Target extends ModuleBasedTarget<SourceRootDescriptor> {
                                                            @NotNull BuildDataPaths dataPaths) {
 
     List<SourceRootDescriptor> result = new ArrayList<>();
+    Set<String> rootPaths = new HashSet<>();
     JavaSourceRootType type = isTests() ? JavaSourceRootType.TEST_SOURCE : JavaSourceRootType.SOURCE;
+    LOG.info("Computing Elixir JPS root descriptors for " + getPresentableName() + ", requested root type=" + type);
+    ModuleUtil.logDiagnostic(myModule, "computeRootDescriptors/" + (isTests() ? "test" : "production"));
     for(JpsTypedModuleSourceRoot<JavaSourceRootProperties> root : myModule.getSourceRoots(type)){
-      result.add(new SourceRootDescriptor(root.getFile(), this));
+      addRootDescriptor(result, rootPaths, root.getFile());
     }
+
+    if (ModuleUtil.isCompilable(myModule)) {
+      for (String contentRootUrl : myModule.getContentRootsList().getUrls()) {
+        File contentRoot = new File(extractPath(contentRootUrl));
+        for (String sourceRootName : mixSourceRootNames()) {
+          File sourceRoot = new File(contentRoot, sourceRootName);
+          addRootDescriptor(result, rootPaths, sourceRoot);
+        }
+      }
+
+      if (result.isEmpty()) {
+        for (String contentRootUrl : myModule.getContentRootsList().getUrls()) {
+          addRootDescriptor(result, rootPaths, new File(extractPath(contentRootUrl)));
+        }
+      }
+    }
+
+    LOG.info("Computed Elixir JPS root descriptors for " + getPresentableName() + ": " + rootPaths);
     return result;
+  }
+
+  private List<String> mixSourceRootNames() {
+    return isTests() ? TEST_MIX_SOURCE_ROOT_NAMES : PRODUCTION_MIX_SOURCE_ROOT_NAMES;
+  }
+
+  private void addRootDescriptor(@NotNull List<SourceRootDescriptor> result,
+                                 @NotNull Set<String> rootPaths,
+                                 @NotNull File root) {
+    if (rootPaths.add(root.getPath())) {
+      result.add(new SourceRootDescriptor(root, this));
+    }
   }
 
   @Nullable

@@ -45,7 +45,10 @@ data class CanonicalFolder(
  */
 val CANONICAL_FOLDER_MARKS: List<CanonicalFolder> = listOf(
     // --- Source roots ---
+    CanonicalFolder("c_src", FolderMark.SOURCES),
+    CanonicalFolder("include", FolderMark.SOURCES),
     CanonicalFolder("lib", FolderMark.SOURCES),
+    CanonicalFolder("src", FolderMark.SOURCES),
     // Pre-Phoenix 1.3 projects used web/ instead of lib/ for source code
     CanonicalFolder("web", FolderMark.SOURCES),
     CanonicalFolder("spec", FolderMark.TEST_SOURCES),

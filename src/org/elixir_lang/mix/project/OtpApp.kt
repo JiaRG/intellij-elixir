@@ -93,8 +93,9 @@ class OtpApp(val root: VirtualFile, appMixFile: VirtualFile) {
     var ideaModuleFile: VirtualFile? = null
     var module: Module? = null
     val name = app(appMixFile)
+    var moduleName = name
 
-    override fun toString(): String = "$name ($root)"
+    override fun toString(): String = "$moduleName ($root)"
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

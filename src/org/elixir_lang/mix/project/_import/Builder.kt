@@ -23,6 +23,7 @@ import com.intellij.packaging.artifacts.ModifiableArtifactModel
 import com.intellij.projectImport.ProjectImportBuilder
 import org.elixir_lang.configuration.ElixirCompilerSettings
 import org.elixir_lang.mix.Icons
+import org.elixir_lang.mix.Project.assignModuleNamesForOtpApps
 import org.elixir_lang.mix.Project.createModulesForOtpApps
 import org.elixir_lang.mix.project.OtpApp
 import org.elixir_lang.sdk.elixir.Type
@@ -167,10 +168,9 @@ class Builder : ProjectImportBuilder<OtpApp>() {
         }
 
         myProjectRoot = projectRoot
-        // Only mark for scan if we don't already have pre-scanned results for this root
-        if (myFoundOtpApps.isEmpty()) {
-            myNeedsScan = true
-        }
+        myFoundOtpApps = emptyList()
+        mySelectedOtpApps = emptyList()
+        myNeedsScan = true
     }
 
     /**
@@ -179,8 +179,8 @@ class Builder : ProjectImportBuilder<OtpApp>() {
      */
     fun setPreScannedApps(projectRoot: VirtualFile, apps: List<OtpApp>) {
         myProjectRoot = projectRoot
-        myFoundOtpApps = apps
-        mySelectedOtpApps = apps
+        myFoundOtpApps = assignModuleNamesForOtpApps(apps, projectRoot)
+        mySelectedOtpApps = myFoundOtpApps
         myNeedsScan = false
     }
 
@@ -193,7 +193,10 @@ class Builder : ProjectImportBuilder<OtpApp>() {
                 if (!unitTestMode && projectRoot is NewVirtualFile) {
                     projectRoot.refreshAndFindChild("deps")
                 }
-                myFoundOtpApps = org.elixir_lang.mix.Project.findOtpApps(projectRoot, indicator)
+                myFoundOtpApps = assignModuleNamesForOtpApps(
+                    org.elixir_lang.mix.Project.findOtpApps(projectRoot, indicator),
+                    projectRoot
+                )
                 mySelectedOtpApps = myFoundOtpApps
             }
         }
@@ -253,7 +256,12 @@ class Builder : ProjectImportBuilder<OtpApp>() {
             var ideaModuleFileExists = false
             for (importedOtpApp in otpApps) {
                 val applicationRoot = importedOtpApp.root
-                val ideaModuleName = moduleNames[importedOtpApp] ?: importedOtpApp.name
+                val ideaModuleName =
+                    if (importedOtpApp.moduleName != importedOtpApp.name) {
+                        importedOtpApp.moduleName
+                    } else {
+                        moduleNames[importedOtpApp] ?: importedOtpApp.name
+                    }
                 val imlFile = applicationRoot.findChild("$ideaModuleName.iml")
                 if (imlFile != null) {
                     ideaModuleFileExists = true

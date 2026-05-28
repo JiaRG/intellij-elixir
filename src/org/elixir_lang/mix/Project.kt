@@ -110,6 +110,14 @@ object Project {
         return result
     }
 
+    fun assignModuleNamesForOtpApps(otpApps: List<OtpApp>, projectRoot: VirtualFile? = null): List<OtpApp> {
+        val moduleNames = moduleNameForOtpApps(otpApps, projectRoot)
+        otpApps.forEach { otpApp ->
+            otpApp.moduleName = moduleNames[otpApp] ?: otpApp.name
+        }
+        return otpApps
+    }
+
     fun createModulesForOtpApps(
         project: Project,
         otpApps: List<OtpApp>,
@@ -120,7 +128,15 @@ object Project {
         if (otpApps.isNotEmpty()) {
             val moduleModel = modifiableModuleModelFactory()
             val moduleNames = moduleNameForOtpApps(otpApps, projectRoot)
-            val createdRootModels = otpApps.mapNotNull { createModuleForOtpApp(it, moduleModel, rootModelModifier, moduleNames[it] ?: it.name) }
+            val createdRootModels = otpApps.mapNotNull {
+                val moduleName =
+                    if (it.moduleName != it.name) {
+                        it.moduleName
+                    } else {
+                        moduleNames[it] ?: it.name
+                    }
+                createModuleForOtpApp(it, moduleModel, rootModelModifier, moduleName)
+            }
 
             if (createdRootModels.isNotEmpty()) {
                 // Use WriteAction.run since this is called from EDT via importToProject

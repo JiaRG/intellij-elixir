@@ -5,10 +5,13 @@ import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.Sdk
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.vfs.VirtualFile
 import org.elixir_lang.Mix
 import org.elixir_lang.package_manager.DepGatherer
 import org.elixir_lang.package_manager.DepsStatusResult
+import org.elixir_lang.sdk.devcontainer.DevContainerSdkAutoConfigurator
+import org.elixir_lang.sdk.elixir.Type as ElixirSdkType
 
 private val LOG = logger<PackageManager>()
 private val ANSI_REGEX = Regex("\u001B\\[[;\\d]*m")
@@ -20,14 +23,21 @@ class PackageManager : org.elixir_lang.PackageManager {
     override fun depGatherer(): DepGatherer = org.elixir_lang.mix.DepGatherer()
 
     override fun depsStatus(project: Project, packageVirtualFile: VirtualFile, sdk: Sdk?): DepsStatusResult {
-        if (sdk == null) {
+        var effectiveSdk = sdk
+        if (effectiveSdk == null && DevContainerSdkAutoConfigurator.configureProjectSdkIfNeeded(project)) {
+            effectiveSdk = ProjectRootManager.getInstance(project).projectSdk
+            LOG.info("Retried Mix deps SDK lookup after Dev Container auto-config: ${effectiveSdk?.name}")
+        }
+
+        val configuredSdk = effectiveSdk ?: return DepsStatusResult.Error("No Elixir SDK configured for Mix")
+        if (configuredSdk.sdkType !is ElixirSdkType) {
             return DepsStatusResult.Error("No Elixir SDK configured for Mix")
         }
 
         val workingDirectory = packageVirtualFile.parent?.path
             ?: return DepsStatusResult.Error("Missing working directory for ${packageVirtualFile.path}")
 
-        val commandLine = Mix.commandLine(emptyMap(), workingDirectory, sdk)
+        val commandLine = Mix.commandLine(emptyMap(), workingDirectory, configuredSdk)
         commandLine.addParameters("deps")
 
         return try {

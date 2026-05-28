@@ -3,6 +3,7 @@ package org.elixir_lang.run
 import com.intellij.execution.configurations.PtyCommandLine
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.trace
+import org.elixir_lang.sdk.devcontainer.DevContainerPaths
 import org.elixir_lang.sdk.wsl.wslCompat
 import java.io.IOException
 
@@ -24,7 +25,13 @@ open class WslAwarePtyCommandLine : PtyCommandLine {
 
     @Throws(IOException::class)
     override fun createProcess(processBuilder: ProcessBuilder): Process {
-        wslCompat.convertProcessBuilderArgumentsForWsl(processBuilder, this)
+        val hasDevContainerPaths = DevContainerPaths.convertProcessBuilderPaths(processBuilder)
+        if (hasDevContainerPaths) {
+            LOG.info("Converted Dev Container paths before PTY process creation")
+        }
+        if (!hasDevContainerPaths && !isDevContainerCommandLine(this)) {
+            wslCompat.convertProcessBuilderArgumentsForWsl(processBuilder, this)
+        }
         LOG.trace { formatCommandLineForLogging(processBuilder, "PTY Command line") }
         return super.createProcess(processBuilder)
     }
